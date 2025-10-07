@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>音樂節奏遊戲 - 優化版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        @keyframes background-pan {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            touch-action: manipulation;
+            background: linear-gradient(-45deg, #1a0b2e, #3d1a54, #111827, #4c1d95);
+            background-size: 400% 400%;
+            animation: background-pan 20s ease infinite;
+            color: #f3f4f6;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #game-container.shake {
+            animation: screen-shake 0.1s ease-in-out;
+        }
+
+        @keyframes screen-shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-3px); }
+            75% { transform: translateX(3px); }
+        }
+
+        .key {
+            transition: all 0.05s ease-out;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-bottom: 4px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .key.active {
+            transform: translateY(2px) scale(0.98);
+            border-bottom-width: 2px;
+            filter: brightness(1.5);
+        }
+        
+        .note {
+            position: absolute;
+            width: 100%;
+            border-radius: 0.5rem;
+            will-change: transform;
+            background-image: linear-gradient(to top, rgba(255,255,255,0.3), transparent);
+            box-shadow: 0 0 10px 2px var(--note-glow-color, #fff), inset 0 0 8px rgba(255,255,255,0.7);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+        }
+
+        #game-area {
+            box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.7), 0 0 20px rgba(167, 139, 250, 0.3);
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(8px);
+            border-width: 2px;
+            border-style: solid;
+            border-image: linear-gradient(to bottom, #a78bfa, #f472b6) 1;
+        }
+        
+        .hit-line {
+            position: absolute;
+            bottom: 10%;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #f472b6, #a78bfa, transparent);
+            box-shadow: 0 0 15px 5px #d085c3;
+            z-index: 10;
+            animation: pulse-glow infinite ease-in-out;
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 15px 5px #d085c3; opacity: 0.8; }
+            50% { box-shadow: 0 0 25px 10px #f472b6; opacity: 1; }
+        }
+
+        .lane-light {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to top, var(--note-glow-color, #fff), transparent 70%);
+            opacity: 0;
+            transform: translateY(100%);
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+        }
+        .key.active .lane-light {
+            opacity: 0.4;
+            transform: translateY(0);
+        }
+
+        .particle {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+            background: var(--particle-color);
+            animation: particle-burst 0.5s ease-out forwards;
+        }
+
+        @keyframes particle-burst {
+            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--x), var(--y)) scale(0); opacity: 0; }
+        }
+        
+        .combo-popup {
+            animation: combo-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes combo-pop {
+            0% { transform: scale(1.2); opacity: 0.8; }
+            50% { transform: scale(1.6); opacity: 1; }
+            100% { transform: scale(1.2); opacity: 0.8; }
+        }
+
+        kbd { text-shadow: none; }
+        
+        .btn-primary {
+            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            background: linear-gradient(to right, #c084fc, #a78bfa, #f472b6);
+            background-size: 200% auto;
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            background-position: right center;
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(216, 180, 254, 0.5);
+        }
+
+        .song-item {
+            border: 1px solid transparent;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05)), linear-gradient(to right, #c084fc, #f472b6);
+            background-origin: border-box;
+            background-clip: content-box, border-box;
+            transition: all 0.2s ease-in-out;
+        }
+        .song-item:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -2px rgba(0,0,0,0.2);
+            border-image: linear-gradient(to right, #f472b6, #c084fc) 1;
+        }
+        
+        .end-rank, .judgement-text-gradient {
+            background: linear-gradient(to top, #fde047, #f97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .judgement-text-gradient {
+             background: var(--judgement-gradient);
+        }
+        
+        .end-rank {
+            animation: rank-appear 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes rank-appear {
+            from { transform: scale(0.5) rotate(-15deg); opacity: 0; }
+            to { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen overflow-hidden">
+
+    <div id="game-container" class="w-full max-w-md mx-auto p-4">
+        
+        <!-- 開始畫面 -->
+        <div id="start-screen" class="text-center space-y-8 bg-black/40 backdrop-blur-sm p-8 rounded-2xl shadow-2xl border border-purple-400/30">
+            <h1 class="text-6xl font-black text-violet-400" style="letter-spacing: 0.1em;">RHYTHM PULSE</h1>
+            <p class="text-gray-300 text-lg">釋放你指尖的電光火石</p>
+            <p class="text-lg">使用 <kbd class="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">D</kbd> <kbd class="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">F</kbd> <kbd class="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">J</kbd> <kbd class="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">K</kbd> 鍵遊玩</p>
+            <button id="start-button" class="w-full btn-primary text-white font-bold py-4 px-6 rounded-lg text-2xl shadow-lg">
+                啟動脈衝
+            </button>
+            <p id="start-error" class="text-red-400 hidden mt-2 text-sm h-5"></p>
+        </div>
+
+        <!-- 歌曲選擇畫面 -->
+        <div id="song-selection-screen" class="hidden text-center space-y-6 bg-black/40 backdrop-blur-sm p-8 rounded-2xl shadow-2xl border border-purple-400/30">
+            <h2 class="text-4xl font-bold text-violet-400">選擇歌曲</h2>
+            <div id="song-list" class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                <!-- Song items will be injected here by JavaScript -->
+            </div>
+        </div>
+
+        <!-- 遊戲畫面 -->
+        <div id="game-screen" class="hidden">
+            <div class="flex justify-between items-center mb-4 px-2">
+                <div>
+                    <span class="text-sm text-gray-400">SCORE</span>
+                    <p id="score" class="text-2xl font-bold">0</p>
+                </div>
+                <div id="combo-display" class="text-center opacity-0 transform scale-125">
+                    <p id="combo-count" class="text-5xl font-black text-violet-300">0</p>
+                    <span class="text-sm font-semibold tracking-widest text-violet-300">COMBO</span>
+                </div>
+                <div>
+                    <span class="text-sm text-gray-400">ACCURACY</span>
+                    <p id="accuracy" class="text-2xl font-bold">100.00%</p>
+                </div>
+            </div>
+
+            <div id="game-area" class="relative h-[80vh] rounded-lg overflow-hidden">
+                <div id="hit-line" class="hit-line"></div>
+                <div class="absolute bottom-0 w-full h-[15%] grid grid-cols-4 gap-1 p-1 z-20">
+                    <div class="key rounded-md" style="--note-glow-color: #34d399;"></div>
+                    <div class="key rounded-md" style="--note-glow-color: #60a5fa;"></div>
+                    <div class="key rounded-md" style="--note-glow-color: #f472b6;"></div>
+                    <div class="key rounded-md" style="--note-glow-color: #a78bfa;"></div>
+                </div>
+                <div id="lanes" class="absolute top-0 w-full h-full grid grid-cols-4 gap-1 p-1 z-0">
+                     <div class="relative border-r border-purple-400/20"><div class="lane-light" style="--note-glow-color: #34d399;"></div></div>
+                     <div class="relative border-r border-purple-400/20"><div class="lane-light" style="--note-glow-color: #60a5fa;"></div></div>
+                     <div class="relative border-r border-purple-400/20"><div class="lane-light" style="--note-glow-color: #f472b6;"></div></div>
+                     <div class="relative"><div class="lane-light" style="--note-glow-color: #a78bfa;"></div></div>
+                </div>
+            </div>
+            <div id="judgement-display" class="absolute bottom-[18%] w-full text-center pointer-events-none z-30">
+                <p id="judgement-text" class="text-4xl font-black opacity-0 transition-all duration-500 transform"></p>
+            </div>
+        </div>
+        
+        <!-- 結束畫面 -->
+        <div id="end-screen" class="hidden text-center space-y-4 bg-black/40 backdrop-blur-sm p-8 rounded-2xl shadow-2xl border border-purple-400/30">
+             <h2 class="text-4xl font-bold text-violet-400">演奏結束</h2>
+             <div>
+                <p class="text-gray-400">最終分數</p>
+                <p id="final-score" class="text-5xl font-bold">0</p>
+             </div>
+             <div class="grid grid-cols-2 gap-4 text-lg">
+                 <div>
+                    <p class="text-gray-400">最大連擊</p>
+                    <p id="max-combo" class="font-bold text-2xl">0</p>
+                 </div>
+                 <div>
+                    <p class="text-gray-400">最終準確率</p>
+                    <p id="final-accuracy" class="font-bold text-2xl">0%</p>
+                 </div>
+             </div>
+             <div class="pt-4">
+                <p class="text-gray-400">評級</p>
+                <p id="rank" class="text-7xl font-extrabold"></p>
+             </div>
+             <button id="restart-button" class="w-full mt-6 btn-primary text-white font-bold py-3 px-6 rounded-lg text-xl shadow-lg">
+                 返回選歌
+             </button>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const gameContainer = document.getElementById('game-container');
+        const startScreen = document.getElementById('start-screen');
+        const songSelectionScreen = document.getElementById('song-selection-screen');
+        const songList = document.getElementById('song-list');
+        const gameScreen = document.getElementById('game-screen');
+        const endScreen = document.getElementById('end-screen');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const startError = document.getElementById('start-error');
+
+        const scoreDisplay = document.getElementById('score');
+        const accuracyDisplay = document.getElementById('accuracy');
+        const comboDisplay = document.getElementById('combo-display');
+        const comboCount = document.getElementById('combo-count');
+        const judgementText = document.getElementById('judgement-text');
+
+        const gameArea = document.getElementById('game-area');
+        const lanesContainer = document.getElementById('lanes');
+        const keys = document.querySelectorAll('.key');
+        const hitLine = document.getElementById('hit-line');
+
+        // 遊戲設定
+        const FALL_SPEED = 5.0; // 預設值，會被歌曲覆蓋
+        const KEY_MAP = ['d', 'f', 'j', 'k'];
+        const LANE_COLORS = ['#34d399', '#60a5fa', '#f472b6', '#a78bfa']; // 綠, 藍, 粉, 紫
+
+        // 準確度判定 (秒)
+        const PERFECT_WINDOW = 0.055;
+        const GOOD_WINDOW = 0.11;
+        const NOTE_HEIGHT_VH = 5;
+
+        // 遊戲狀態
+        const gameState = {
+            score: 0, combo: 0, maxCombo: 0,
+            hits: { perfect: 0, good: 0, miss: 0 },
+            totalNotes: 0, accuracy: 100, gameLoopId: null,
+            notesOnScreen: [], audioContext: null, hitSound: null, musicPart: null,
+            keyDownHandler: null, touchStartHandlers: [], currentFallSpeed: 2.0
+        };
+        
+        // 歌曲資料
+        const songs = [
+            {
+                title: "寧靜月光",
+                artist: "沉思者",
+                bpm: 60,
+                fallSpeed: 5.0,
+                duration: "8m",
+                melody: [{ time: "0:0", pitch: "C4" }, { time: "0:2", pitch: "G4" }, { time: "1:0", pitch: "E4" }, { time: "1:2", pitch: "A4" }, { time: "2:0", pitch: "D4" }, { time: "2:2", pitch: "A4" }, { time: "3:0", pitch: "F4" }, { time: "3:2", pitch: "C5" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:2:0", lane: 1 }, { time: "1:0:0", lane: 2 }, { time: "1:2:0", lane: 3 }, { time: "2:0:0", lane: 0 }, { time: "2:1:0", lane: 1 }, { time: "2:2:0", lane: 2 }, { time: "2:3:0", lane: 3 }, { time: "3:0:0", lane: 0 }, { time: "3:2:0", lane: 2 }, { time: "4:0:0", lane: 3 }, { time: "4:2:0", lane: 2 }, { time: "5:0:0", lane: 1 }, { time: "5:2:0", lane: 0 }, { time: "6:0:0", lane: 3 }, { time: "6:1:0", lane: 2 }, { time: "6:2:0", lane: 1 }, { time: "6:3:0", lane: 0 }, { time: "7:0:0", lane: 3 }, { time: "7:2:0", lane: 1 } ]
+            },
+            {
+                title: "水晶洞窟",
+                artist: "地底迴響",
+                bpm: 85,
+                fallSpeed: 4.0,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "C4" }, { time: "0:2", pitch: "E4" }, { time: "1:0", pitch: "G4" }, { time: "1:2", pitch: "C5" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:2:0", lane: 3 }, { time: "1:0:0", lane: 1 }, { time: "1:2:0", lane: 2 }, { time: "2:0:0", lane: 0 }, { time: "2:2:0", lane: 3 }, { time: "3:0:0", lane: 1 }, { time: "3:2:0", lane: 2 }, { time: "4:0:0", lane: 0 }, { time: "4:1:0", lane: 1 }, { time: "4:2:0", lane: 2 }, { time: "4:3:0", lane: 3 }, { time: "5:0:0", lane: 3 }, { time: "5:1:0", lane: 2 }, { time: "5:2:0", lane: 1 }, { time: "5:3:0", lane: 0 }, { time: "6:0:0", lane: 0 }, { time: "6:0:2", lane: 1 }, { time: "6:2:0", lane: 2 }, { time: "6:2:2", lane: 3 }, { time: "7:0:0", lane: 0 }, { time: "7:0:2", lane: 2 }, { time: "7:2:0", lane: 1 }, { time: "7:2:2", lane: 3 }, { time: "8:0:0", lane: 0 }, { time: "8:2:0", lane: 3 }, { time: "9:0:0", lane: 1 }, { time: "9:2:0", lane: 2 }, { time: "10:0:0", lane: 0 }, { time: "10:2:0", lane: 3 }, { time: "11:0:0", lane: 1 }, { time: "11:2:0", lane: 2 }, { time: "12:0:0", lane: 0 }, { time: "12:1:0", lane: 1 }, { time: "12:2:0", lane: 2 }, { time: "12:3:0", lane: 3 }, { time: "13:0:0", lane: 3 }, { time: "13:1:0", lane: 2 }, { time: "13:2:0", lane: 1 }, { time: "13:3:0", lane: 0 }, { time: "14:0:0", lane: 0 }, { time: "14:0:2", lane: 1 }, { time: "14:2:0", lane: 2 }, { time: "14:2:2", lane: 3 }, { time: "15:0:0", lane: 0 }, { time: "15:0:2", lane: 2 }, { time: "15:2:0", lane: 1 }, { time: "15:2:2", lane: 3 } ]
+            },
+            {
+                title: "脈衝迴響",
+                artist: "虛擬迴路",
+                bpm: 100,
+                fallSpeed: 3.0,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "C4" }, { time: "0:1", pitch: "E4" }, { time: "0:2", pitch: "G4" }, { time: "0:3", pitch: "C5" }, { time: "1:0", pitch: "G4" }, { time: "1:1", pitch: "E4" }, { time: "1:2", pitch: "C4" }, { time: "1:3", pitch: "E4" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:0:2", lane: 1 }, { time: "0:1:0", lane: 2 }, { time: "0:1:2", lane: 3 }, { time: "0:2:0", lane: 0 }, { time: "0:2:1", lane: 0 }, { time: "0:2:2", lane: 3 }, { time: "0:2:3", lane: 3 }, { time: "0:3:0", lane: 1 }, { time: "0:3:2", lane: 2 }, { time: "1:0:0", lane: 0 }, { time: "1:0:1", lane: 1 }, { time: "1:0:2", lane: 2 }, { time: "1:0:3", lane: 3 }, { time: "1:1:0", lane: 0 }, { time: "1:1:1", lane: 2 }, { time: "1:1:2", lane: 1 }, { time: "1:1:3", lane: 3 }, { time: "1:2:0", lane: 0 }, { time: "1:2:2", lane: 1 }, { time: "1:3:0", lane: 2 }, { time: "1:3:2", lane: 3 }, { time: "2:0:0", lane: 0 }, { time: "2:0:2", lane: 3 }, { time: "2:1:0", lane: 1 }, { time: "2:1:2", lane: 2 }, { time: "2:2:0", lane: 0 }, { time: "2:2:2", lane: 3 }, { time: "2:3:0", lane: 1 }, { time: "2:3:2", lane: 2 }, { time: "3:0:0", lane: 0 }, { time: "3:0:1", lane: 1 }, { time: "3:0:2", lane: 2 }, { time: "3:0:3", lane: 3 }, { time: "3:2:0", lane: 0 }, { time: "3:2:1", lane: 1 }, { time: "3:2:2", lane: 2 }, { time: "3:2:3", lane: 3 }, { time: "4:0:0", lane: 0 }, { time: "4:0:2", lane: 1 }, { time: "4:1:0", lane: 2 }, { time: "4:1:2", lane: 3 }, { time: "4:2:0", lane: 0 }, { time: "4:2:1", lane: 0 }, { time: "4:2:2", lane: 3 }, { time: "4:2:3", lane: 3 }, { time: "4:3:0", lane: 1 }, { time: "4:3:2", lane: 2 }, { time: "5:0:0", lane: 0 }, { time: "5:0:1", lane: 1 }, { time: "5:0:2", lane: 2 }, { time: "5:0:3", lane: 3 }, { time: "5:1:0", lane: 0 }, { time: "5:1:1", lane: 2 }, { time: "5:1:2", lane: 1 }, { time: "5:1:3", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:2:2", lane: 1 }, { time: "5:3:0", lane: 2 }, { time: "5:3:2", lane: 3 }, { time: "6:0:0", lane: 0 }, { time: "6:0:2", lane: 3 }, { time: "6:1:0", lane: 1 }, { time: "6:1:2", lane: 2 }, { time: "6:2:0", lane: 0 }, { time: "6:2:2", lane: 3 }, { time: "6:3:0", lane: 1 }, { time: "6:3:2", lane: 2 }, { time: "7:0:0", lane: 0 }, { time: "7:0:1", lane: 1 }, { time: "7:0:2", lane: 2 }, { time: "7:0:3", lane: 3 }, { time: "7:2:0", lane: 0 }, { time: "7:2:1", lane: 1 }, { time: "7:2:2", lane: 2 }, { time: "7:2:3", lane: 3 } ]
+            },
+             {
+                title: "都會夜遊",
+                artist: "合成波浪",
+                bpm: 110,
+                fallSpeed: 2.8,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "A3" }, { time: "0:1", pitch: "C4" }, { time: "0:2", pitch: "E4" }, { time: "0:3", pitch: "A4" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:2:0", lane: 0 }, { time: "0:3:0", lane: 3 }, { time: "1:1:0", lane: 1 }, { time: "1:3:0", lane: 2 }, { time: "2:0:0", lane: 3 }, { time: "2:2:0", lane: 3 }, { time: "2:3:0", lane: 0 }, { time: "3:1:0", lane: 2 }, { time: "3:3:0", lane: 1 }, { time: "4:0:0", lane: 0 }, { time: "4:0:2", lane: 1 }, { time: "4:2:0", lane: 2 }, { time: "4:2:2", lane: 3 }, { time: "5:0:0", lane: 0 }, { time: "5:1:0", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:3:0", lane: 3 }, { time: "6:0:0", lane: 1 }, { time: "6:0:2", lane: 2 }, { time: "6:1:0", lane: 1 }, { time: "6:1:2", lane: 2 }, { time: "6:2:0", lane: 0 }, { time: "6:2:2", lane: 3 }, { time: "6:3:0", lane: 0 }, { time: "6:3:2", lane: 3 }, { time: "7:0:0", lane: 1 }, { time: "7:1:0", lane: 0 }, { time: "7:2:0", lane: 2 }, { time: "7:3:0", lane: 3 }, { time: "8:0:0", lane: 0 }, { time: "8:2:0", lane: 0 }, { time: "8:3:0", lane: 3 }, { time: "9:1:0", lane: 1 }, { time: "9:3:0", lane: 2 }, { time: "10:0:0", lane: 3 }, { time: "10:2:0", lane: 3 }, { time: "10:3:0", lane: 0 }, { time: "11:1:0", lane: 2 }, { time: "11:3:0", lane: 1 }, { time: "12:0:0", lane: 0 }, { time: "12:0:2", lane: 1 }, { time: "12:2:0", lane: 2 }, { time: "12:2:2", lane: 3 }, { time: "13:0:0", lane: 0 }, { time: "13:1:0", lane: 3 }, { time: "13:2:0", lane: 0 }, { time: "13:3:0", lane: 3 }, { time: "14:0:0", lane: 1 }, { time: "14:0:2", lane: 2 }, { time: "14:1:0", lane: 1 }, { time: "14:1:2", lane: 2 }, { time: "14:2:0", lane: 0 }, { time: "14:2:2", lane: 3 }, { time: "14:3:0", lane: 0 }, { time: "14:3:2", lane: 3 }, { time: "15:0:0", lane: 1 }, { time: "15:1:0", lane: 0 }, { time: "15:2:0", lane: 2 }, { time: "15:3:0", lane: 3 } ]
+            },
+            {
+                title: "霓虹浪潮",
+                artist: "電子幻象",
+                bpm: 120,
+                fallSpeed: 2.5,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "F#3" }, { time: "0:2", pitch: "C#4" }, { time: "1:0", pitch: "E4" }, { time: "1:2", pitch: "B4" }, { time: "2:0", pitch: "F#4" }, { time: "2:2", pitch: "E4" }],
+                beatmap: [ { time: "0:0:0", lane: 1 }, { time: "0:1:0", lane: 2 }, { time: "0:2:0", lane: 1 }, { time: "0:3:0", lane: 2 }, { time: "1:0:0", lane: 0 }, { time: "1:1:0", lane: 3 }, { time: "1:2:0", lane: 0 }, { time: "1:3:0", lane: 3 }, { time: "2:0:0", lane: 1 }, { time: "2:0:2", lane: 2 }, { time: "2:1:0", lane: 0 }, { time: "2:1:2", lane: 3 }, { time: "2:2:0", lane: 1 }, { time: "2:2:2", lane: 2 }, { time: "2:3:0", lane: 0 }, { time: "2:3:2", lane: 3 }, { time: "3:0:0", lane: 0 }, { time: "3:0:2", lane: 1 }, { time: "3:1:0", lane: 2 }, { time: "3:1:2", lane: 3 }, { time: "3:2:0", lane: 0 }, { time: "3:2:2", lane: 1 }, { time: "3:3:0", lane: 2 }, { time: "3:3:2", lane: 3 }, { time: "4:0:0", lane: 1 }, { time: "4:1:0", lane: 2 }, { time: "4:2:0", lane: 1 }, { time: "4:3:0", lane: 2 }, { time: "5:0:0", lane: 0 }, { time: "5:1:0", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:3:0", lane: 3 }, { time: "6:0:0", lane: 0 }, { time: "6:0:2", lane: 3 }, { time: "6:1:0", lane: 1 }, { time: "6:1:2", lane: 2 }, { time: "6:2:0", lane: 0 }, { time: "6:2:2", lane: 3 }, { time: "6:3:0", lane: 1 }, { time: "6:3:2", lane: 2 }, { time: "7:0:0", lane: 0 }, { time: "7:0:2", lane: 1 }, { time: "7:1:0", lane: 3 }, { time: "7:1:2", lane: 2 }, { time: "7:2:0", lane: 0 }, { time: "7:2:2", lane: 1 }, { time: "7:3:0", lane: 3 }, { time: "7:3:2", lane: 2 } ]
+            },
+            {
+                title: "星塵疾馳",
+                artist: "宇宙射線",
+                bpm: 140,
+                fallSpeed: 2.0,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "C5" }, { time: "0:0:2", pitch: "E5" }, { time: "0:1", pitch: "G5" }, { time: "0:1:2", pitch: "C6" }, { time: "0:2", pitch: "G5" }, { time: "0:2:2", pitch: "E5" }, { time: "0:3", pitch: "C5" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:0:2", lane: 1 }, { time: "0:1:0", lane: 0 }, { time: "0:1:2", lane: 1 }, { time: "0:2:0", lane: 2 }, { time: "0:2:2", lane: 3 }, { time: "0:3:0", lane: 2 }, { time: "0:3:2", lane: 3 }, { time: "1:0:0", lane: 0 }, { time: "1:0:1", lane: 1 }, { time: "1:0:2", lane: 2 }, { time: "1:0:3", lane: 3 }, { time: "1:1:0", lane: 0 }, { time: "1:1:1", lane: 2 }, { time: "1:1:2", lane: 1 }, { time: "1:1:3", lane: 3 }, { time: "1:2:0", lane: 0 }, { time: "1:2:1", lane: 3 }, { time: "1:2:2", lane: 1 }, { time: "1:2:3", lane: 2 }, { time: "1:3:0", lane: 0 }, { time: "1:3:1", lane: 1 }, { time: "1:3:2", lane: 2 }, { time: "1:3:3", lane: 3 }, { time: "2:0:0", lane: 0 }, { time: "2:0:1", lane: 0 }, { time: "2:0:2", lane: 1 }, { time: "2:0:3", lane: 1 }, { time: "2:1:0", lane: 2 }, { time: "2:1:1", lane: 2 }, { time: "2:1:2", lane: 3 }, { time: "2:1:3", lane: 3 }, { time: "3:0:0", lane: 0 }, { time: "3:0:2", lane: 0 }, { time: "3:1:0", lane: 1 }, { time: "3:1:2", lane: 1 }, { time: "3:2:0", lane: 2 }, { time: "3:2:2", lane: 2 }, { time: "3:3:0", lane: 3 }, { time: "3:3:2", lane: 3 }, { time: "4:0:0", lane: 0 }, { time: "4:0:2", lane: 1 }, { time: "4:1:0", lane: 0 }, { time: "4:1:2", lane: 1 }, { time: "4:2:0", lane: 2 }, { time: "4:2:2", lane: 3 }, { time: "4:3:0", lane: 2 }, { time: "4:3:2", lane: 3 }, { time: "5:0:0", lane: 0 }, { time: "5:0:1", lane: 1 }, { time: "5:0:2", lane: 2 }, { time: "5:0:3", lane: 3 }, { time: "5:1:0", lane: 0 }, { time: "5:1:1", lane: 2 }, { time: "5:1:2", lane: 1 }, { time: "5:1:3", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:2:1", lane: 3 }, { time: "5:2:2", lane: 1 }, { time: "5:2:3", lane: 2 }, { time: "5:3:0", lane: 0 }, { time: "5:3:1", lane: 1 }, { time: "5:3:2", lane: 2 }, { time: "5:3:3", lane: 3 }, { time: "6:0:0", lane: 0 }, { time: "6:0:1", lane: 0 }, { time: "6:0:2", lane: 1 }, { time: "6:0:3", lane: 1 }, { time: "6:1:0", lane: 2 }, { time: "6:1:1", lane: 2 }, { time: "6:1:2", lane: 3 }, { time: "6:1:3", lane: 3 }, { time: "7:0:0", lane: 0 }, { time: "7:0:2", lane: 0 }, { time: "7:1:0", lane: 1 }, { time: "7:1:2", lane: 1 }, { time: "7:2:0", lane: 2 }, { time: "7:2:2", lane: 2 }, { time: "7:3:0", lane: 3 }, { time: "7:3:2", lane: 3 } ]
+            },
+            {
+                title: "破曉強襲",
+                artist: "音速核心",
+                bpm: 170,
+                fallSpeed: 1.8,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "A5" }, { time: "0:1", pitch: "G5" }, { time: "0:2", pitch: "A5" }, { time: "0:3", pitch: "F5" }, { time: "1:0", pitch: "G5" }, { time: "1:1", pitch: "E5" }, { time: "1:2", pitch: "F5" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:0:1", lane: 1 }, { time: "0:0:2", lane: 0 }, { time: "0:0:3", lane: 1 }, { time: "0:1:0", lane: 2 }, { time: "0:1:1", lane: 3 }, { time: "0:1:2", lane: 2 }, { time: "0:1:3", lane: 3 }, { time: "0:2:0", lane: 0 }, { time: "0:2:1", lane: 2 }, { time: "0:2:2", lane: 1 }, { time: "0:2:3", lane: 3 }, { time: "0:3:0", lane: 0 }, { time: "0:3:1", lane: 2 }, { time: "0:3:2", lane: 1 }, { time: "0:3:3", lane: 3 }, { time: "1:0:0", lane: 0 }, { time: "1:0:1", lane: 1 }, { time: "1:0:2", lane: 2 }, { time: "1:0:3", lane: 3 }, { time: "1:1:0", lane: 3 }, { time: "1:1:1", lane: 2 }, { time: "1:1:2", lane: 1 }, { time: "1:1:3", lane: 0 }, { time: "1:2:0", lane: 0 }, { time: "1:2:0", lane: 2 }, { time: "1:2:2", lane: 1 }, { time: "1:2:2", lane: 3 }, { time: "1:3:0", lane: 0 }, { time: "1:3:0", lane: 2 }, { time: "1:3:2", lane: 1 }, { time: "1:3:2", lane: 3 }, { time: "2:0:0", lane: 0 }, { time: "2:0:2", lane: 1 }, { time: "2:1:0", lane: 2 }, { time: "2:1:2", lane: 3 }, { time: "2:2:0", lane: 0 }, { time: "2:2:1", lane: 1 }, { time: "2:2:2", lane: 0 }, { time: "2:2:3", lane: 1 }, { time: "2:3:0", lane: 2 }, { time: "2:3:1", lane: 3 }, { time: "2:3:2", lane: 2 }, { time: "2:3:3", lane: 3 }, { time: "3:0:0", lane: 0 }, { time: "3:0:1", lane: 2 }, { time: "3:0:2", lane: 1 }, { time: "3:0:3", lane: 3 }, { time: "3:1:0", lane: 0 }, { time: "3:1:1", lane: 2 }, { time: "3:1:2", lane: 1 }, { time: "3:1:3", lane: 3 }, { time: "3:2:0", lane: 0 }, { time: "3:2:1", lane: 1 }, { time: "3:2:2", lane: 2 }, { time: "3:2:3", lane: 3 }, { time: "3:3:0", lane: 3 }, { time: "3:3:1", lane: 2 }, { time: "3:3:2", lane: 1 }, { time: "3:3:3", lane: 0 }, { time: "4:0:0", lane: 0 }, { time: "4:0:0", lane: 3 }, { time: "4:1:0", lane: 1 }, { time: "4:1:0", lane: 2 }, { time: "4:2:0", lane: 0 }, { time: "4:2:0", lane: 3 }, { time: "4:3:0", lane: 1 }, { time: "4:3:0", lane: 2 }, { time: "5:0:0", lane: 0 }, { time: "5:0:2", lane: 2 }, { time: "5:1:0", lane: 1 }, { time: "5:1:2", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:2:2", lane: 2 }, { time: "5:3:0", lane: 1 }, { time: "5:3:2", lane: 3 }, { time: "6:0:0", lane: 0 }, { time: "6:0:1", lane: 1 }, { time: "6:0:2", lane: 0 }, { time: "6:0:3", lane: 2 }, { time: "6:1:0", lane: 1 }, { time: "6:1:1", lane: 3 }, { time: "6:1:2", lane: 2 }, { time: "6:1:3", lane: 0 }, { time: "6:2:0", lane: 1 }, { time: "6:2:1", lane: 2 }, { time: "6:2:2", lane: 0 }, { time: "6:2:3", lane: 3 }, { time: "6:3:0", lane: 2 }, { time: "6:3:1", lane: 1 }, { time: "6:3:2", lane: 3 }, { time: "6:3:3", lane: 0 }, { time: "7:0:0", lane: 0 }, { time: "7:0:1", lane: 3 }, { time: "7:0:2", lane: 1 }, { time: "7:0:3", lane: 2 }, { time: "7:1:0", lane: 0 }, { time: "7:1:1", lane: 3 }, { time: "7:1:2", lane: 1 }, { time: "7:1:3", lane: 2 }, { time: "7:2:0", lane: 0 }, { time: "7:2:1", lane: 1 }, { time: "7:2:2", lane: 2 }, { time: "7:2:3", lane: 3 }, { time: "7:3:0", lane: 0 }, { time: "7:3:1", lane: 1 }, { time: "7:3:2", lane: 2 }, { time: "7:3:3", lane: 3 } ]
+            },
+            {
+                title: "最終決戰",
+                artist: "次元裂縫",
+                bpm: 180,
+                fallSpeed: 1.7,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "C6" }, { time: "0:1", pitch: "A5" }, { time: "0:2", pitch: "B5" }, { time: "0:3", pitch: "G5" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:0:2", lane: 3 }, { time: "0:1:0", lane: 1 }, { time: "0:1:2", lane: 2 }, { time: "0:2:0", lane: 0 }, { time: "0:2:1", lane: 1 }, { time: "0:2:2", lane: 2 }, { time: "0:2:3", lane: 3 }, { time: "0:3:0", lane: 0 }, { time: "0:3:1", lane: 3 }, { time: "0:3:2", lane: 1 }, { time: "0:3:3", lane: 2 }, { time: "1:0:0", lane: 0 }, { time: "1:0:0", lane: 2 }, { time: "1:1:0", lane: 1 }, { time: "1:1:0", lane: 3 }, { time: "1:2:0", lane: 0 }, { time: "1:2:2", lane: 2 }, { time: "1:3:0", lane: 1 }, { time: "1:3:2", lane: 3 }, { time: "2:0:0", lane: 0 }, { time: "2:0:1", lane: 1 }, { time: "2:0:2", lane: 2 }, { time: "2:0:3", lane: 3 }, { time: "2:1:0", lane: 0 }, { time: "2:1:1", lane: 1 }, { time: "2:1:2", lane: 2 }, { time: "2:1:3", lane: 3 }, { time: "2:2:0", lane: 3 }, { time: "2:2:1", lane: 2 }, { time: "2:2:2", lane: 1 }, { time: "2:2:3", lane: 0 }, { time: "2:3:0", lane: 3 }, { time: "2:3:1", lane: 2 }, { time: "2:3:2", lane: 1 }, { time: "2:3:3", lane: 0 }, { time: "3:0:0", lane: 0 }, { time: "3:0:0", lane: 1 }, { time: "3:1:0", lane: 2 }, { time: "3:1:0", lane: 3 }, { time: "3:2:0", lane: 0 }, { time: "3:2:0", lane: 1 }, { time: "3:3:0", lane: 2 }, { time: "3:3:0", lane: 3 }, { time: "4:0:0", lane: 0 }, { time: "4:0:1", lane: 2 }, { time: "4:0:2", lane: 1 }, { time: "4:0:3", lane: 3 }, { time: "4:1:0", lane: 0 }, { time: "4:1:1", lane: 2 }, { time: "4:1:2", lane: 1 }, { time: "4:1:3", lane: 3 }, { time: "4:2:0", lane: 0 }, { time: "4:2:1", lane: 3 }, { time: "4:2:2", lane: 0 }, { time: "4:2:3", lane: 3 }, { time: "4:3:0", lane: 1 }, { time: "4:3:1", lane: 2 }, { time: "4:3:2", lane: 1 }, { time: "4:3:3", lane: 2 }, { time: "5:0:0", lane: 0 }, { time: "5:0:2", lane: 1 }, { time: "5:1:0", lane: 2 }, { time: "5:1:2", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:2:2", lane: 2 }, { time: "5:3:0", lane: 1 }, { time: "5:3:2", lane: 3 }, { time: "6:0:0", lane: 0 }, { time: "6:0:1", lane: 1 }, { time: "6:0:2", lane: 2 }, { time: "6:0:3", lane: 0 }, { time: "6:1:0", lane: 1 }, { time: "6:1:1", lane: 2 }, { time: "6:1:2", lane: 3 }, { time: "6:1:3", lane: 1 }, { time: "6:2:0", lane: 2 }, { time: "6:2:1", lane: 3 }, { time: "6:2:2", lane: 0 }, { time: "6:2:3", lane: 2 }, { time: "6:3:0", lane: 3 }, { time: "6:3:1", lane: 0 }, { time: "6:3:2", lane: 1 }, { time: "6:3:3", lane: 3 }, { time: "7:0:0", lane: 0 }, { time: "7:0:0", lane: 3 }, { time: "7:1:0", lane: 1 }, { time: "7:1:0", lane: 2 }, { time: "7:2:0", lane: 0 }, { time: "7:2:0", lane: 3 }, { time: "7:3:0", lane: 1 }, { time: "7:3:0", lane: 2 } ]
+            },
+            {
+                title: "量子跳躍",
+                artist: "超新星",
+                bpm: 190,
+                fallSpeed: 1.6,
+                duration: "16m",
+                melody: [{ time: "0:0", pitch: "C7" }, { time: "0:1", pitch: "A6" }, { time: "0:2", pitch: "B6" }],
+                beatmap: [ { time: "0:0:0", lane: 0 }, { time: "0:0:1", lane: 1 }, { time: "0:0:2", lane: 2 }, { time: "0:0:3", lane: 3 }, { time: "0:1:0", lane: 0 }, { time: "0:1:1", lane: 1 }, { time: "0:1:2", lane: 2 }, { time: "0:1:3", lane: 3 }, { time: "0:2:0", lane: 0 }, { time: "0:2:1", lane: 2 }, { time: "0:2:2", lane: 1 }, { time: "0:2:3", lane: 3 }, { time: "0:3:0", lane: 0 }, { time: "0:3:1", lane: 3 }, { time: "0:3:2", lane: 0 }, { time: "0:3:3", lane: 3 }, { time: "1:0:0", lane: 1 }, { time: "1:0:1", lane: 2 }, { time: "1:0:2", lane: 1 }, { time: "1:0:3", lane: 2 }, { time: "1:1:0", lane: 0 }, { time: "1:1:1", lane: 3 }, { time: "1:1:2", lane: 0 }, { time: "1:1:3", lane: 3 }, { time: "1:2:0", lane: 0 }, { time: "1:2:1", lane: 1 }, { time: "1:2:2", lane: 3 }, { time: "1:2:3", lane: 2 }, { time: "1:3:0", lane: 0 }, { time: "1:3:1", lane: 1 }, { time: "1:3:2", lane: 3 }, { time: "1:3:3", lane: 2 }, { time: "2:0:0", lane: 0 }, { time: "2:0:0", lane: 2 }, { time: "2:1:0", lane: 1 }, { time: "2:1:0", lane: 3 }, { time: "2:2:0", lane: 0 }, { time: "2:2:0", lane: 2 }, { time: "2:3:0", lane: 1 }, { time: "2:3:0", lane: 3 }, { time: "3:0:0", lane: 0 }, { time: "3:0:2", lane: 3 }, { time: "3:1:0", lane: 1 }, { time: "3:1:2", lane: 2 }, { time: "3:2:0", lane: 0 }, { time: "3:2:2", lane: 3 }, { time: "3:3:0", lane: 1 }, { time: "3:3:2", lane: 2 }, { time: "4:0:0", lane: 0 }, { time: "4:0:1", lane: 1 }, { time: "4:0:2", lane: 2 }, { time: "4:0:3", lane: 3 }, { time: "4:1:0", lane: 0 }, { time: "4:1:1", lane: 1 }, { time: "4:1:2", lane: 2 }, { time: "4:1:3", lane: 3 }, { time: "4:2:0", lane: 0 }, { time: "4:2:1", lane: 2 }, { time: "4:2:2", lane: 1 }, { time: "4:2:3", lane: 3 }, { time: "4:3:0", lane: 0 }, { time: "4:3:1", lane: 3 }, { time: "4:3:2", lane: 0 }, { time: "4:3:3", lane: 3 }, { time: "5:0:0", lane: 1 }, { time: "5:0:1", lane: 2 }, { time: "5:0:2", lane: 1 }, { time: "5:0:3", lane: 2 }, { time: "5:1:0", lane: 0 }, { time: "5:1:1", lane: 3 }, { time: "5:1:2", lane: 0 }, { time: "5:1:3", lane: 3 }, { time: "5:2:0", lane: 0 }, { time: "5:2:1", lane: 1 }, { time: "5:2:2", lane: 3 }, { time: "5:2:3", lane: 2 }, { time: "5:3:0", lane: 0 }, { time: "5:3:1", lane: 1 }, { time: "5:3:2", lane: 3 }, { time: "5:3:3", lane: 2 }, { time: "6:0:0", lane: 0 }, { time: "6:0:0", lane: 2 }, { time: "6:1:0", lane: 1 }, { time: "6:1:0", lane: 3 }, { time: "6:2:0", lane: 0 }, { time: "6:2:0", lane: 2 }, { time: "6:3:0", lane: 1 }, { time: "6:3:0", lane: 3 }, { time: "7:0:0", lane: 0 }, { time: "7:0:2", lane: 3 }, { time: "7:1:0", lane: 1 }, { time: "7:1:2", lane: 2 }, { time: "7:2:0", lane: 0 }, { time: "7:2:2", lane: 3 }, { time: "7:3:0", lane: 1 }, { time: "7:3:2", lane: 2 } ]
+            }
+        ];
+
+        function showScreen(screenId) {
+            ['start-screen', 'song-selection-screen', 'game-screen', 'end-screen'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(screenId).classList.remove('hidden');
+        }
+
+        async function initAudio() {
+            if (gameState.audioContext) return;
+            await Tone.start();
+            gameState.hitSound = new Tone.MembraneSynth({
+                pitchDecay: 0.01, octaves: 6, oscillator: { type: "sine" },
+                envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
+            }).toDestination();
+            gameState.audioContext = Tone.context;
+        }
+
+        function displaySongSelection() {
+            songList.innerHTML = '';
+            songs.forEach(song => {
+                const songEl = document.createElement('button');
+                songEl.className = 'song-item w-full text-left p-4 rounded-lg cursor-pointer';
+                songEl.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-xl font-bold text-white">${song.title}</h3>
+                            <p class="text-sm text-gray-400">${song.artist}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-lg font-semibold text-violet-300">${song.bpm} BPM</p>
+                        </div>
+                    </div>
+                `;
+                songEl.addEventListener('click', () => startGame(song));
+                songList.appendChild(songEl);
+            });
+            showScreen('song-selection-screen');
+        }
+
+        function resetGameState() {
+            gameState.score = 0; gameState.combo = 0; gameState.maxCombo = 0;
+            gameState.hits = { perfect: 0, good: 0, miss: 0 };
+            gameState.accuracy = 100;
+            gameState.notesOnScreen.forEach(n => n.element.remove());
+            gameState.notesOnScreen = [];
+            lanesContainer.querySelectorAll('.particle').forEach(p => p.remove());
+            if (gameState.musicPart) {
+                gameState.musicPart.stop();
+                gameState.musicPart.dispose();
+                gameState.musicPart = null;
+            }
+            updateUI();
+        }
+
+        function startGame(song) {
+            resetGameState();
+            showScreen('game-screen');
+            
+            gameState.totalNotes = song.beatmap.length;
+            gameState.currentFallSpeed = song.fallSpeed;
+
+            const secondsPerBeat = 60.0 / song.bpm;
+            hitLine.style.animationDuration = `${secondsPerBeat}s`;
+
+            Tone.Transport.stop();
+            Tone.Transport.cancel();
+            Tone.Transport.bpm.value = song.bpm;
+            
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "fmsine" },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.2 }
+            }).toDestination();
+
+            gameState.musicPart = new Tone.Part((time, note) => {
+                synth.triggerAttackRelease(note.pitch, "8n", time);
+            }, song.melody).start(0);
+            gameState.musicPart.loop = true;
+            gameState.musicPart.loopEnd = song.duration;
+            
+            song.beatmap.forEach(noteData => {
+                Tone.Transport.scheduleOnce(time => {
+                    spawnNote(noteData.lane, Tone.Time(noteData.time).toSeconds());
+                }, noteData.time);
+            });
+            
+            Tone.Transport.scheduleOnce(() => endGame(), song.duration);
+            Tone.Transport.start();
+            gameState.gameLoopId = requestAnimationFrame(gameLoop);
+            setupInputListeners();
+        }
+
+        function endGame() {
+            cancelAnimationFrame(gameState.gameLoopId);
+            Tone.Transport.stop();
+            removeInputListeners();
+            showScreen('end-screen');
+
+            document.getElementById('final-score').textContent = gameState.score;
+            document.getElementById('max-combo').textContent = gameState.maxCombo;
+            document.getElementById('final-accuracy').textContent = gameState.accuracy.toFixed(2) + '%';
+            
+            let rank = 'D';
+            const totalJudged = gameState.hits.perfect + gameState.hits.good + gameState.hits.miss;
+            const isFullCombo = (gameState.hits.perfect + gameState.hits.good === gameState.totalNotes) && totalJudged === gameState.totalNotes;
+
+            if (gameState.hits.perfect === gameState.totalNotes && totalJudged === gameState.totalNotes) rank = 'AP';
+            else if (isFullCombo) rank = 'FC';
+            else {
+                const acc = gameState.accuracy;
+                if (acc > 98) rank = 'S';
+                else if (acc > 95) rank = 'A';
+                else if (acc > 90) rank = 'B';
+                else if (acc > 80) rank = 'C';
+            }
+            
+            const rankEl = document.getElementById('rank');
+            rankEl.textContent = rank;
+            const rankColors = { 
+                'S': 'text-yellow-300', 'A': 'text-green-400', 'B': 'text-blue-400', 
+                'C': 'text-purple-400', 'D': 'text-gray-500', 
+                'FC': 'text-cyan-300', 'AP': 'text-pink-400'
+            };
+            rankEl.className = `text-7xl font-extrabold end-rank ${rankColors[rank] || 'text-white'}`;
+        }
+        
+        function setupInputListeners() {
+            removeInputListeners();
+            gameState.keyDownHandler = (e) => handleInput(e.key.toLowerCase());
+            window.addEventListener('keydown', gameState.keyDownHandler);
+            
+            keys.forEach((key, index) => {
+                const handlerFunc = (e) => {
+                    e.preventDefault();
+                    handleInput(KEY_MAP[index]);
+                };
+                gameState.touchStartHandlers.push({ element: key, func: handlerFunc });
+                key.addEventListener('touchstart', handlerFunc, { passive: false });
+            });
+        }
+
+        function removeInputListeners() {
+            if (gameState.keyDownHandler) {
+                window.removeEventListener('keydown', gameState.keyDownHandler);
+                gameState.keyDownHandler = null;
+            }
+            gameState.touchStartHandlers.forEach(({element, func}) => {
+                element.removeEventListener('touchstart', func);
+            });
+            gameState.touchStartHandlers = [];
+        }
+
+        function handleInput(key) {
+            const lane = KEY_MAP.indexOf(key);
+            if (lane === -1) return;
+
+            keys[lane].classList.add('active');
+            checkHit(lane);
+            setTimeout(() => keys[lane].classList.remove('active'), 100);
+        }
+
+        function spawnNote(lane, spawnTime) {
+            const note = document.createElement('div');
+            note.className = 'note';
+            const noteHeight = window.innerHeight * (NOTE_HEIGHT_VH / 100);
+            note.style.height = `${noteHeight}px`;
+            note.style.backgroundColor = LANE_COLORS[lane];
+            note.style.setProperty('--note-glow-color', LANE_COLORS[lane]);
+            
+            const targetTime = spawnTime + gameState.currentFallSpeed;
+            gameState.notesOnScreen.push({ element: note, lane, targetTime });
+            lanesContainer.children[lane].appendChild(note);
+        }
+
+        function gameLoop() {
+            const currentTime = Tone.Transport.seconds;
+            const gameAreaHeight = gameArea.offsetHeight;
+            const hitLinePosition = gameAreaHeight * 0.85; 
+
+            for (let i = gameState.notesOnScreen.length - 1; i >= 0; i--) {
+                const noteInfo = gameState.notesOnScreen[i];
+                const { element, targetTime } = noteInfo;
+
+                const timeUntilTarget = targetTime - currentTime;
+                const progress = 1 - (timeUntilTarget / gameState.currentFallSpeed);
+
+                element.style.transform = `translateY(${progress * hitLinePosition}px)`;
+                
+                if (currentTime > targetTime + GOOD_WINDOW && element.parentElement) {
+                    element.remove();
+                    gameState.notesOnScreen.splice(i, 1);
+                    handleJudgement('miss');
+                }
+            }
+            gameState.gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function checkHit(lane) {
+            const currentTime = Tone.Transport.seconds;
+            
+            for (let i = 0; i < gameState.notesOnScreen.length; i++) {
+                const noteInfo = gameState.notesOnScreen[i];
+                if (noteInfo.lane === lane) {
+                    const timeDiff = Math.abs(currentTime - noteInfo.targetTime);
+                    if (timeDiff <= GOOD_WINDOW) {
+                        const judgement = timeDiff <= PERFECT_WINDOW ? 'perfect' : 'good';
+                        handleJudgement(judgement);
+                        
+                        gameState.hitSound.triggerAttackRelease("C2", "8n");
+                        createHitParticles(lane);
+                        if (judgement === 'perfect') {
+                            gameContainer.classList.add('shake');
+                            setTimeout(() => gameContainer.classList.remove('shake'), 100);
+                        }
+                        
+                        noteInfo.element.remove();
+                        gameState.notesOnScreen.splice(i, 1);
+                        return; // 只處理最近的一個音符
+                    }
+                }
+            }
+        }
+
+        function handleJudgement(type) {
+            if (type === 'miss') gameState.combo = 0;
+            else gameState.combo++;
+            
+            gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
+            gameState.hits[type]++;
+
+            const judgementMap = {
+                perfect: { score: 300, text: 'PERFECT', gradient: 'linear-gradient(to top, #f472b6, #f9a8d4)' },
+                good: { score: 150, text: 'GOOD', gradient: 'linear-gradient(to top, #60a5fa, #93c5fd)' },
+                miss: { score: 0, text: 'MISS', gradient: 'linear-gradient(to top, #6b7280, #9ca3af)' }
+            };
+            const j = judgementMap[type];
+            gameState.score += j.score;
+            showJudgementText(j.text, j.gradient);
+            updateUI();
+        }
+
+        function updateUI() {
+            scoreDisplay.textContent = gameState.score;
+            if(gameState.combo > 2) {
+                comboDisplay.classList.remove('opacity-0');
+                comboDisplay.classList.add('combo-popup');
+                comboCount.textContent = gameState.combo;
+                setTimeout(() => comboDisplay.classList.remove('combo-popup'), 300);
+            } else {
+                comboDisplay.classList.add('opacity-0');
+            }
+
+            const totalJudgements = gameState.hits.perfect + gameState.hits.good + gameState.hits.miss;
+            if (totalJudgements > 0) {
+                const accuracyScore = (gameState.hits.perfect * 300 + gameState.hits.good * 150) / (totalJudgements * 300);
+                gameState.accuracy = accuracyScore * 100;
+                accuracyDisplay.textContent = isNaN(gameState.accuracy) ? '100.00%' : gameState.accuracy.toFixed(2) + '%';
+            } else {
+                accuracyDisplay.textContent = '100.00%';
+            }
+        }
+        
+        function showJudgementText(text, gradient) {
+            judgementText.textContent = text;
+            judgementText.style.setProperty('--judgement-gradient', gradient);
+            judgementText.className = 'text-4xl font-black opacity-100 transition-all duration-100 transform scale-125 judgement-text-gradient';
+            setTimeout(() => {
+                judgementText.className = 'text-4xl font-black opacity-0 transition-all duration-500 transform scale-100 judgement-text-gradient';
+            }, 100);
+        }
+
+        function createHitParticles(lane) {
+            const laneEl = lanesContainer.children[lane];
+            for (let i = 0; i < 15; i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                p.style.setProperty('--particle-color', LANE_COLORS[lane]);
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * 50 + 20;
+                p.style.setProperty('--x', `${Math.cos(angle) * distance}px`);
+                p.style.setProperty('--y', `${Math.sin(angle) * distance}px`);
+                const size = Math.random() * 5 + 2;
+                p.style.width = `${size}px`;
+                p.style.height = `${size}px`;
+                p.style.bottom = '10%';
+                p.style.left = '50%';
+                laneEl.appendChild(p);
+                setTimeout(() => p.remove(), 500);
+            }
+        }
+
+        // 事件監聽器
+        startButton.addEventListener('click', async () => {
+            startButton.disabled = true;
+            startButton.textContent = '初始化...';
+            startError.classList.add('hidden');
+            try {
+                await initAudio();
+                displaySongSelection();
+            } catch (error) {
+                console.error("無法初始化音訊:", error);
+                startError.textContent = "無法啟動音訊。請點擊畫面並重試。";
+                startError.classList.remove('hidden');
+            } finally {
+                startButton.disabled = false;
+                startButton.textContent = '啟動脈衝';
+            }
+        });
+        restartButton.addEventListener('click', displaySongSelection);
+    </script>
+</body>
+</html>
+
